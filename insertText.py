@@ -22,7 +22,7 @@ def encode_message(image, output, message):
     pixels = img.load()
 
     # Convert message to binary
-    binary_message = '1011011100011010100' + message_binary(message) + '0100100011100101011'
+    binary_message = message_binary(message) + '00000000'
 
     binary_index = 0
     width, height = img.size
