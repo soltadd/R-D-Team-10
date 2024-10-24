@@ -1,5 +1,9 @@
 from PIL import Image
 
+def remove_non_ascii(text):
+    return ''.join(char for char in text if ord(char) <= 127)
+
+
 #Convert message to binary
 def message_binary(message):
     #Go through each character in string, convert to ASCII, and then format it into binary
@@ -22,7 +26,10 @@ def encode_message(image, output, message):
     pixels = img.load()
 
     # Convert message to binary
-    binary_message = message_binary(message) + '00000000'
+    ascii_message = remove_non_ascii(message)
+
+    delimiter = message_binary("####END####")
+    binary_message = message_binary(ascii_message) + delimiter
 
     binary_index = 0
     width, height = img.size
@@ -42,10 +49,16 @@ def encode_message(image, output, message):
     # Save the modified image
     img.save(output)
 
+
+#Get user input for image being used and file
 #input
-image_path = "inputImage.png"
+image_path = input("Please enter image name: ")
 output_path = "outputImage.png"
-message = "I am a hidden message"
+
+text_file = input("Please enter text file: ")
+
+with open(text_file, "r", encoding="utf-8-sig") as file:
+    message = file.read()
 
 encode_message(image_path, output_path, message)
 
