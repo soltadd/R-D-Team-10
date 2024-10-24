@@ -1,4 +1,5 @@
 from PIL import Image
+import os
 
 def remove_non_ascii(text):
     return ''.join(char for char in text if ord(char) <= 127)
@@ -13,11 +14,22 @@ def message_binary(message):
 
 # Modify LSB of pixel
 def modify_pixel(pixel, bit):
-    r, g, b, Irr = pixel
-    r = (r & ~1) | int(bit[0])
-    g = (g & ~1) | int(bit[1])
-    b = (b & ~1) | int(bit[2])
-    return (r, g, b, Irr)
+    if len(pixel) == 4:  # RGBA
+        r, g, b, a = pixel
+        r = (r & ~1) | int(bit[0])
+        g = (g & ~1) | int(bit[1])
+        b = (b & ~1) | int(bit[2])
+        return (r, g, b, a)
+    elif len(pixel) == 3:  # RGB
+        r, g, b = pixel
+        r = (r & ~1) | int(bit[0])
+        g = (g & ~1) | int(bit[1])
+        b = (b & ~1) | int(bit[2])
+        return (r, g, b)
+    elif len(pixel) == 1:  # Grayscale (PGM)
+        g = pixel[0]
+        g = (g & ~1) | int(bit[0])
+        return (g,)
 
 #Encode message
 def encode_message(image, output, message):
@@ -49,16 +61,66 @@ def encode_message(image, output, message):
     # Save the modified image
     img.save(output)
 
+#list images function
+def list_images(folder):
+    images = [f for f in os.listdir(folder)]
+    return images
+
+def list_files(folder):
+    files = [f for f in os.listdir(folder)]
+    return files
+
 
 #Get user input for image being used and file
 #input
-image_path = input("Please enter image name: ")
-output_path = "outputImage.png"
 
-text_file = input("Please enter text file: ")
+hide_another = True
+while hide_another:
+    #Information about what's supported
+    print("Supported image types: BMP, PPM, PGM")
+    print("Hides Text Only\n")
+    print("Welcome to Command Line Interface...\n")
 
-with open(text_file, "r", encoding="utf-8-sig") as file:
-    message = file.read()
+    #Display image names in Image folder
+    image_folder = "Images folder"
+    images_in_folder = list_images(image_folder)
+    for img in images_in_folder:
+        print(f" - {img}")
 
-encode_message(image_path, output_path, message)
+    #get image input
+    print("\n")
+    image_name = input("Please enter image name: ")
+    image_folder = "Images folder"
+    image_path = os.path.join(image_folder, image_name)
+
+    # Create output image folder if it doesn't exist
+    output_image_input = input("Please enter output image name: ")
+    output_folder = "Output image folder"
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)  # Create the folder
+    output_path = os.path.join(output_folder, output_image_input)
+
+
+    #Display Secret files choices
+    Secret_files_folder = "Secret files folder"
+    files_in_folder = list_files(Secret_files_folder)
+    for files in files_in_folder:
+        print(f" - {files}")
+
+    #Get text input
+    print("\n")
+    text_name = input("Please enter text file: ")
+    text_folder = "Secret files folder"
+    text_file = os.path.join(text_folder, text_name)
+
+    with open(text_file, "r", encoding="utf-8-sig") as file:
+        message = file.read()
+
+
+    encode_message(image_path, output_path, message)
+
+    another = input("Would you like to encode another message? y/n: ")
+    if another == "n":
+        hide_another = False
+
 
