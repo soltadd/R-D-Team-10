@@ -1,154 +1,293 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
+from tkinter.simpledialog import askstring
 from PIL import Image, ImageTk
-import codecs
+import numpy as np
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+import base64
 import os
+from hashlib import sha256
 
-class SteganographyApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Steganography App")
+class SteganographyTool:
+    def __init__(self, window):
+        self.window = window
+        self.original_image_path = None
+        self.encoded_image_path = None
+        self.text_content = tk.StringVar()
+        self.text_file_path = None
+        self.encryption_passphrase = None
+        self.text_file_size = None  # Added to store the file size
+        self.setup_ui()
+
+    def setup_ui(self):
+        # Left Frame: Controls (Buttons)
+        self.frame_left = tk.Frame(self.window, padx=10, pady=10)
+        self.frame_left.pack(side="left", fill="y")
+
+        self.select_image_button = tk.Button(self.frame_left, text="Select Image", command=self.select_image)
+        self.select_image_button.grid(row=0, column=0, pady=10)
+
+        self.select_text_button = tk.Button(self.frame_left, text="Select Text File", command=self.select_text)
+        self.select_text_button.grid(row=1, column=0, pady=10)
+
+        self.encode_button = tk.Button(self.frame_left, text="Encode", command=self.encode_image)
+        self.encode_button.grid(row=2, column=0, pady=10)
+
+        self.decode_button = tk.Button(self.frame_left, text="Decode", command=self.decode_image)
+        self.decode_button.grid(row=3, column=0, pady=10)
+
+        self.save_decoded_text_button = tk.Button(self.frame_left, text="Save Decoded Text", command=self.save_decoded_text)
+        self.save_decoded_text_button.grid(row=4, column=0, pady=10)
+
+        # Encryption Section
+        self.encryption_label = tk.Label(self.frame_left, text="Encryption Passphrase:")
+        self.encryption_label.grid(row=5, column=0, pady=10)
+        self.encryption_button = tk.Button(self.frame_left, text="Enter Passphrase", command=self.set_passphrase)
+        self.encryption_button.grid(row=6, column=0, pady=10)
+
+        # Right Frame: Tabbed Interface for Image Display
+        self.frame_right = tk.Frame(self.window, padx=10, pady=10)
+        self.frame_right.pack(side="left", fill="y", expand=True)
+
+        self.tab_control = ttk.Notebook(self.frame_right)
+
+        # Tab 1: Selected Image
+        self.selected_image_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(self.selected_image_tab, text="Selected Image")
+
+        # Tab 2: Encoded Image
+        self.encoded_image_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(self.encoded_image_tab, text="Encoded Image")
+
+        # Pack the tab control
+        self.tab_control.grid(row=0, column=0, padx=20, pady=20)
+
+        # Labels inside tabs to display images
+        self.selected_image_label = tk.Label(self.selected_image_tab)
+        self.selected_image_label.pack(pady=20)
+
+        self.encoded_image_label = tk.Label(self.encoded_image_tab)
+        self.encoded_image_label.pack(pady=20)
+
+        # Add a scrollable Text widget for decoded text
+        self.decoded_text_frame = tk.Frame(self.frame_right)
+        self.decoded_text_frame.grid(row=1, column=0, pady=10)
+
+        # Scrollbar
+        self.scrollbar = tk.Scrollbar(self.decoded_text_frame)
+        self.scrollbar.pack(side="right", fill="y")
+
+        # Text widget to display decoded text with scrollbar
+        self.decoded_text_label = tk.Text(self.decoded_text_frame, wrap="word", height=10, width=50)
+        self.decoded_text_label.pack(side="left", fill="both", expand=True)
         
-        self.create_widgets()
+        # Link scrollbar to the Text widget
+        self.decoded_text_label.config(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.config(command=self.decoded_text_label.yview)
         
-        self.original_image = None
-        self.stego_image = None
+        # Initially disable text editing
+        self.decoded_text_label.config(state=tk.DISABLED)
 
-    def create_widgets(self):
-        # Header
-        header = tk.Label(self.root, text="Steganography App", font=("Helvetica", 16))
-        header.pack(pady=10)
+        # Information Labels for displaying PSNR and file size
+        self.info_frame = tk.Frame(self.frame_right, padx=10, pady=10)
+        self.info_frame.grid(row=2, column=0, pady=10)
 
-        # Encode Section
-        self.encode_frame = tk.Frame(self.root)
-        self.encode_frame.pack(pady=10)
-        
-        tk.Label(self.encode_frame, text="Select Original Image:").grid(row=0, column=0)
-        self.original_image_entry = tk.Entry(self.encode_frame, width=40)
-        self.original_image_entry.grid(row=0, column=1)
-        tk.Button(self.encode_frame, text="Browse", command=self.browse_original_image).grid(row=0, column=2)
+        # PSNR and image size labels
+        self.psnr_original_label = tk.Label(self.info_frame, text="PSNR of Original Image (dB): N/A")
+        self.psnr_original_label.grid(row=0, column=0, pady=5)
 
-        tk.Label(self.encode_frame, text="Enter Message:").grid(row=1, column=0)
-        self.message_entry = tk.Entry(self.encode_frame, width=40)
-        self.message_entry.grid(row=1, column=1, columnspan=2)
+        self.psnr_stego_label = tk.Label(self.info_frame, text="PSNR of Stego-Image (dB): N/A")
+        self.psnr_stego_label.grid(row=1, column=0, pady=5)
 
-        tk.Button(self.encode_frame, text="Encode", command=self.encode_message).grid(row=2, columnspan=3)
+        self.image_size_label = tk.Label(self.info_frame, text="Image Size (dB): N/A")  # Updated label
+        self.image_size_label.grid(row=2, column=0, pady=5)
 
-        # Preview Section
-        tk.Label(self.encode_frame, text="Original Image Preview:").grid(row=3, columnspan=3)
-        self.original_image_preview = tk.Label(self.encode_frame)
-        self.original_image_preview.grid(row=4, columnspan=3, pady=5)
+    def set_passphrase(self):
+        """Prompt the user to enter a passphrase for encryption/decryption."""
+        self.encryption_passphrase = askstring("Enter Passphrase", "Enter encryption passphrase:")
+        if not self.encryption_passphrase:
+            messagebox.showerror("Error", "Passphrase is required for encryption/decryption.")
+        else:
+            messagebox.showinfo("Success", "Passphrase set successfully!")
 
-        # Decode Section
-        self.decode_frame = tk.Frame(self.root)
-        self.decode_frame.pack(pady=10)
-        
-        tk.Label(self.decode_frame, text="Select Stego Image:").grid(row=0, column=0)
-        self.stego_image_entry = tk.Entry(self.decode_frame, width=40)
-        self.stego_image_entry.grid(row=0, column=1)
-        tk.Button(self.decode_frame, text="Browse", command=self.browse_stego_image).grid(row=0, column=2)
+    def select_image(self):
+        """Allow user to select an image file."""
+        self.original_image_path = filedialog.askopenfilename(filetypes=[("Image files", "*.png;*.jpg;*.jpeg")])
+        if self.original_image_path:
+            self.display_image(self.original_image_path, self.selected_image_label)
 
-        tk.Button(self.decode_frame, text="Decode", command=self.decode_message).grid(row=1, columnspan=3)
+            # Calculate PSNR for the original image and update the label
+            psnr_original = self.calculate_psnr(self.original_image_path, self.original_image_path)
+            self.psnr_original_label.config(text=f"PSNR of Original Image (dB): {psnr_original:.2f}")
 
-        # Decoded Message and Preview Section
-        tk.Label(self.decode_frame, text="Decoded Message:").grid(row=2, column=0)
-        self.decoded_message_display = tk.Text(self.decode_frame, height=5, width=50)
-        self.decoded_message_display.grid(row=2, column=1, columnspan=2)
+            # Calculate the image size in dB (using PSNR for image quality)
+            image_size_db = self.calculate_psnr(self.original_image_path, self.original_image_path)  # Use PSNR as the 'size' in dB
+            self.image_size_label.config(text=f"Image Size (dB): {image_size_db:.2f}")
 
-        tk.Label(self.decode_frame, text="Decoded Image Preview:").grid(row=3, columnspan=3)
-        self.decoded_image_preview = tk.Label(self.decode_frame)
-        self.decoded_image_preview.grid(row=4, columnspan=3, pady=5)
+    def select_text(self):
+        """Allow user to select a text file and calculate its file size."""
+        self.text_file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
+        if self.text_file_path:
+            # Calculate the file size in KB
+            self.text_file_size = os.path.getsize(self.text_file_path) / 1024  # Size in KB
+            with open(self.text_file_path, 'r') as file:
+                text = file.read()
+                if self.encryption_passphrase:
+                    text = self.decrypt_text(text)  # Decrypt text if passphrase is set
+                self.text_content.set(text)
 
-    def browse_original_image(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png;*.jpg;*.jpeg")])
-        if file_path:
-            self.original_image_entry.delete(0, tk.END)
-            self.original_image_entry.insert(0, file_path)
-            self.display_image(file_path, self.original_image_preview)
-            self.original_image = Image.open(file_path)
+            # Update file size label
+            self.image_size_label.config(text=f"File Size (KB): {self.text_file_size:.2f}")  # Keep this label for file size (KB)
 
-    def browse_stego_image(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png;*.jpg;*.jpeg")])
-        if file_path:
-            self.stego_image_entry.delete(0, tk.END)
-            self.stego_image_entry.insert(0, file_path)
-            self.display_image(file_path, self.decoded_image_preview)
+    def encrypt_text(self, text):
+        """Encrypt the text using AES encryption."""
+        # Use SHA-256 to hash the passphrase and ensure it is 32 bytes
+        key = sha256(self.encryption_passphrase.encode()).digest()
+        cipher = AES.new(key, AES.MODE_CBC)
+        ct_bytes = cipher.encrypt(pad(text.encode(), AES.block_size))
+        iv = base64.b64encode(cipher.iv).decode('utf-8')
+        ct = base64.b64encode(ct_bytes).decode('utf-8')
+        return iv + ct  # Return IV + Ciphertext
 
-    def display_image(self, path, label):
-        img = Image.open(path)
-        img.thumbnail((200, 200))  # Resize for preview
-        img = ImageTk.PhotoImage(img)
-        label.config(image=img)
-        label.image = img  # Keep a reference to avoid garbage collection
+    def decrypt_text(self, encrypted_text):
+        """Decrypt the text using AES decryption."""
+        iv = base64.b64decode(encrypted_text[:24])
+        ct = base64.b64decode(encrypted_text[24:])
+        key = sha256(self.encryption_passphrase.encode()).digest()
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        pt = unpad(cipher.decrypt(ct), AES.block_size)
+        return pt.decode('utf-8')
 
-    def encode_message(self):
-        image_path = self.original_image_entry.get()
-        message = self.message_entry.get()
-
-        if not os.path.isfile(image_path) or not message:
-            messagebox.showerror("Error", "Please select a valid image and enter a message.")
+    def encode_image(self):
+        """Encode the selected text into the selected image."""
+        if not self.original_image_path or not self.text_content.get():
+            messagebox.showerror("Error", "Please select both an image and a text file.")
             return
-        
-        # Encode the message into the image
-        img = Image.open(image_path)
-        encoded_image = self.steganography_encode(img, message)
 
-        output_path = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[("PNG files", "*.png")])
-        if output_path:
-            encoded_image.save(output_path)
-            messagebox.showinfo("Success", "Message encoded successfully!")
-
-    def decode_message(self):
-        stego_image_path = self.stego_image_entry.get()
-        
-        if not os.path.isfile(stego_image_path):
-            messagebox.showerror("Error", "Please select a valid stego image.")
+        if not self.encryption_passphrase:
+            messagebox.showerror("Error", "Please enter a passphrase before encoding.")
             return
-        
-        # Decode the message from the image
-        img = Image.open(stego_image_path)
-        message = self.steganography_decode(img)
-        self.decoded_message_display.delete(1.0, tk.END)
-        self.decoded_message_display.insert(tk.END, message)
 
-        # Preview the decoded image if available
-        self.display_image(stego_image_path, self.decoded_image_preview)
+        original_image = Image.open(self.original_image_path)
+        pixels = original_image.load()
 
-    def steganography_encode(self, img, message):
-        binary_message = ''.join(format(ord(char), '08b') for char in message) + '00000000'  # Null byte to mark end
-        data_index = 0
-        pixels = img.load()
-        
-        for y in range(img.height):
-            for x in range(img.width):
-                if data_index < len(binary_message):
-                    r, g, b = pixels[x, y]
-                    # Change the least significant bit
-                    r = (r & ~1) | int(binary_message[data_index])
-                    pixels[x, y] = (r, g, b)
-                    data_index += 1
-                else:
-                    return img
-        return img
+        # Encrypt the text before encoding
+        text = self.text_content.get()
+        encrypted_text = self.encrypt_text(text)
 
-    def steganography_decode(self, img):
-        binary_message = ""
-        pixels = img.load()
+        end_marker = '11111111'  # End marker to indicate the end of the hidden text
+        binary_text = ''.join(format(ord(c), '08b') for c in encrypted_text) + end_marker
+        text_length = len(binary_text)
 
-        for y in range(img.height):
-            for x in range(img.width):
+        # Ensure the image is large enough to hold the text
+        if text_length > original_image.width * original_image.height * 3:
+            messagebox.showerror("Error", "Text is too large for this image!")
+            return
+
+        # Encode the text into the image
+        index = 0
+        for y in range(original_image.height):
+            for x in range(original_image.width):
                 r, g, b = pixels[x, y]
-                binary_message += str(r & 1)
+                if index < text_length:
+                    r = (r & 0xFE) | int(binary_text[index])  # Modify LSB of Red
+                    index += 1
+                if index < text_length:
+                    g = (g & 0xFE) | int(binary_text[index])  # Modify LSB of Green
+                    index += 1
+                if index < text_length:
+                    b = (b & 0xFE) | int(binary_text[index])  # Modify LSB of Blue
+                    index += 1
+                pixels[x, y] = (r, g, b)
 
-        message = ""
-        for i in range(0, len(binary_message), 8):
-            byte = binary_message[i:i + 8]
-            if byte == '00000000':  # End of message
+            if index >= text_length:
                 break
-            message += chr(int(byte, 2))
-        return message
+
+        # Save encoded image and update encoded image path
+        encoded_image_path = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[("PNG files", "*.png")])
+        if encoded_image_path:
+            original_image.save(encoded_image_path)  # Save the stego image
+            self.encoded_image_path = encoded_image_path  # Update the path to the encoded image
+            self.display_image(encoded_image_path, self.encoded_image_label)  # Display the encoded image
+
+            # Calculate PSNR of the original and encoded (stego) image
+            psnr_stego = self.calculate_psnr(self.original_image_path, encoded_image_path)
+            self.psnr_stego_label.config(text=f"PSNR of Stego-Image (dB): {psnr_stego:.2f}")
+
+            messagebox.showinfo("Success", "Image encoded and saved successfully!")
+
+    def calculate_psnr(self, original_image_path, encoded_image_path):
+        """Calculate PSNR (Peak Signal to Noise Ratio) between two images.""" 
+        original_image = np.array(Image.open(original_image_path))
+        encoded_image = np.array(Image.open(encoded_image_path))
+
+        mse = np.mean((original_image - encoded_image) ** 2)
+        if mse == 0:
+            return float('inf')  # If MSE is 0, images are identical, PSNR is infinite
+        max_pixel = 255.0
+        psnr = 10 * np.log10((max_pixel ** 2) / mse)
+        return psnr
+
+    def display_image(self, image_path, label):
+        """Display an image on the specified label.""" 
+        image = Image.open(image_path)
+        image.thumbnail((200, 200))
+        img = ImageTk.PhotoImage(image)
+        label.config(image=img)
+        label.image = img
+
+    def decode_image(self):
+        """Decode the hidden text from the selected image.""" 
+        if not self.encoded_image_path:
+            messagebox.showerror("Error", "Please select an encoded image.")
+            return
+
+        encoded_image = Image.open(self.encoded_image_path)
+        pixels = encoded_image.load()
+
+        binary_text = ""
+        for y in range(encoded_image.height):
+            for x in range(encoded_image.width):
+                r, g, b = pixels[x, y]
+                binary_text += str(r & 1)  # Extract LSB of Red
+                binary_text += str(g & 1)  # Extract LSB of Green
+                binary_text += str(b & 1)  # Extract LSB of Blue
+
+        end_marker_index = binary_text.find('11111111')
+        if end_marker_index != -1:
+            binary_text = binary_text[:end_marker_index]  # Remove the end marker
+            decoded_text = ''.join(chr(int(binary_text[i:i+8], 2)) for i in range(0, len(binary_text), 8))
+            
+            # Decrypt the text if passphrase is set
+            if self.encryption_passphrase:
+                decoded_text = self.decrypt_text(decoded_text)
+            
+            self.decoded_text_label.config(state=tk.NORMAL)
+            self.decoded_text_label.delete(1.0, tk.END)
+            self.decoded_text_label.insert(tk.END, decoded_text)
+            self.decoded_text_label.config(state=tk.DISABLED)
+        else:
+            messagebox.showerror("Error", "No hidden text found in this image.")
+    
+    def save_decoded_text(self):
+        """Save the decoded text to a file.""" 
+        if self.decoded_text_label.get(1.0, tk.END).strip():
+            save_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
+            if save_path:
+                with open(save_path, 'w') as file:
+                    file.write(self.decoded_text_label.get(1.0, tk.END).strip())
+                messagebox.showinfo("Success", "Decoded text saved successfully!")
+        else:
+            messagebox.showerror("Error", "No decoded text to save.")
 
 if __name__ == "__main__":
+    # Initialize the main window
     root = tk.Tk()
-    app = SteganographyApp(root)
+    root.title("Digital Steganography App")
+
+    # Create the Steganography tool
+    app = SteganographyTool(root)
+
+    # Run the Tkinter event loop
     root.mainloop()
